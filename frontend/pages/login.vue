@@ -68,7 +68,7 @@
       <v-card-text class="w-100">
         <v-form @submit.prevent="authenticate">
           <v-text-field
-            v-if="allowPasswordLogin"
+            v-show="allowPasswordLogin"
             v-model="form.email"
             :prepend-inner-icon="$globals.icons.email"
             variant="solo-filled"
@@ -81,7 +81,7 @@
             type="text"
           />
           <v-text-field
-            v-if="allowPasswordLogin"
+            v-show="allowPasswordLogin"
             id="password"
             v-model="form.password"
             :prepend-inner-icon="$globals.icons.lock"
