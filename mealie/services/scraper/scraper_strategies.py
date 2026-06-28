@@ -583,7 +583,7 @@ class RecipeScraperOpenAITranscription(ABCScraperStrategy):
                     self.logger.exception("Failed to read subtitles, falling back to transcription")
                     video_data["transcription"] = ""
 
-            if not video_data["transcription"]:
+            if not video_data["transcription"] and video_data["audio"]:
                 if on_progress:
                     await on_progress(self.translator.t("recipe.create-progress.transcribing-audio-with-ai"))
 
