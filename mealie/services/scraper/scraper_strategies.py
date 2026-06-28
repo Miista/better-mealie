@@ -566,7 +566,8 @@ class RecipeScraperOpenAITranscription(ABCScraperStrategy):
                     if not i:
                         i = _re.search(r'<meta[^>]+content=["\'](.*?)["\'][^>]+property=["\']og:image["\']', self.raw_html, _re.IGNORECASE | _re.DOTALL)
                     if i:
-                        og_image = i.group(1)
+                        import html as _html
+                        og_image = _html.unescape(i.group(1))
                 if not og_description:
                     raise
                 self.logger.info(f"yt-dlp failed, falling back to OG description for {self.url}")
