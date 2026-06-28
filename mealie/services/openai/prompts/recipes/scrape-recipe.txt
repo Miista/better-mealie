@@ -3,3 +3,14 @@ Extract recipe data from webpage contents (HTML, text, etc.) and return it in sc
 Do not create or make up any information. If insufficient data is found, return an empty object.
 
 You will receive the webpage contents, including (but not necessarily limited to) text extracted from the HTML.
+
+Translate all text fields (description, ingredients, instructions) to Danish. Keep the recipe name/title in its original language.
+
+Convert all measurements to metric units:
+- Cups → deciliter (dl) or grams (g) depending on context
+- Tablespoons (tbsp) → spsk
+- Teaspoons (tsp) → tsk
+- Ounces (oz) → grams (g) — 1 oz = 28 g
+- Pounds (lb) → grams (g) or kilograms (kg) — 1 lb = 450 g
+- Fahrenheit (°F) → Celsius (°C) — use formula (°F - 32) × 5/9, rounded to nearest 5°C
+- Inches → centimeter (cm)

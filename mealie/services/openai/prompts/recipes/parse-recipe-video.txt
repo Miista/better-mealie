@@ -5,3 +5,14 @@ Do not create or make up any information. If insufficient data is found, return 
 - The video transcript is the primary source for instructions.
 - The caption text is the primary source for the ingredient list and title.
 - If there is a conflict (e.g., caption says "1 cup" but transcript says "1.5 cups"), trust the video transcript.
+
+Translate all text fields (description, ingredients, instructions) to Danish. Keep the recipe name/title in its original language.
+
+Convert all measurements to metric units:
+- Cups → deciliter (dl) or grams (g) depending on context
+- Tablespoons (tbsp) → spsk
+- Teaspoons (tsp) → tsk
+- Ounces (oz) → grams (g) — 1 oz = 28 g
+- Pounds (lb) → grams (g) or kilograms (kg) — 1 lb = 450 g
+- Fahrenheit (°F) → Celsius (°C) — use formula (°F - 32) × 5/9, rounded to nearest 5°C
+- Inches → centimeter (cm)
