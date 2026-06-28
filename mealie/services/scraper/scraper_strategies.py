@@ -549,6 +549,7 @@ class RecipeScraperOpenAITranscription(ABCScraperStrategy):
                 # Fall back to OG description from the already-fetched HTML.
                 og_description = ""
                 og_title = ""
+                og_image = None
                 if self.raw_html:
                     import re as _re
                     m = _re.search(r'<meta[^>]+property=["\']og:description["\'][^>]+content=["\'](.*?)["\']', self.raw_html, _re.IGNORECASE | _re.DOTALL)
@@ -561,6 +562,11 @@ class RecipeScraperOpenAITranscription(ABCScraperStrategy):
                         t = _re.search(r'<meta[^>]+content=["\'](.*?)["\'][^>]+property=["\']og:title["\']', self.raw_html, _re.IGNORECASE | _re.DOTALL)
                     if t:
                         og_title = t.group(1)
+                    i = _re.search(r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\'](.*?)["\']', self.raw_html, _re.IGNORECASE | _re.DOTALL)
+                    if not i:
+                        i = _re.search(r'<meta[^>]+content=["\'](.*?)["\'][^>]+property=["\']og:image["\']', self.raw_html, _re.IGNORECASE | _re.DOTALL)
+                    if i:
+                        og_image = i.group(1)
                 if not og_description:
                     raise
                 self.logger.info(f"yt-dlp failed, falling back to OG description for {self.url}")
@@ -570,7 +576,7 @@ class RecipeScraperOpenAITranscription(ABCScraperStrategy):
                     "transcription": "",
                     "audio": None,
                     "title": og_title,
-                    "thumbnail_url": None,
+                    "thumbnail_url": og_image,
                 }
 
             if video_data["subtitle"]:
