@@ -542,7 +542,36 @@ class RecipeScraperOpenAITranscription(ABCScraperStrategy):
             if on_progress:
                 await on_progress(self.translator.t("recipe.create-progress.downloading-video"))
 
-            video_data = await asyncio.to_thread(self._download_audio, temp_path)
+            try:
+                video_data = await asyncio.to_thread(self._download_audio, temp_path)
+            except exceptions.VideoDownloadError:
+                # yt-dlp couldn't download (e.g. Instagram requires login).
+                # Fall back to OG description from the already-fetched HTML.
+                og_description = ""
+                og_title = ""
+                if self.raw_html:
+                    import re as _re
+                    m = _re.search(r'<meta[^>]+property=["\']og:description["\'][^>]+content=["\'](.*?)["\']', self.raw_html, _re.IGNORECASE | _re.DOTALL)
+                    if not m:
+                        m = _re.search(r'<meta[^>]+content=["\'](.*?)["\'][^>]+property=["\']og:description["\']', self.raw_html, _re.IGNORECASE | _re.DOTALL)
+                    if m:
+                        og_description = m.group(1)
+                    t = _re.search(r'<meta[^>]+property=["\']og:title["\'][^>]+content=["\'](.*?)["\']', self.raw_html, _re.IGNORECASE | _re.DOTALL)
+                    if not t:
+                        t = _re.search(r'<meta[^>]+content=["\'](.*?)["\'][^>]+property=["\']og:title["\']', self.raw_html, _re.IGNORECASE | _re.DOTALL)
+                    if t:
+                        og_title = t.group(1)
+                if not og_description:
+                    raise
+                self.logger.info(f"yt-dlp failed, falling back to OG description for {self.url}")
+                video_data = {
+                    "subtitle": None,
+                    "description": og_description,
+                    "transcription": "",
+                    "audio": None,
+                    "title": og_title,
+                    "thumbnail_url": None,
+                }
 
             if video_data["subtitle"]:
                 try:
@@ -573,7 +602,7 @@ class RecipeScraperOpenAITranscription(ABCScraperStrategy):
             return None, None
 
         self.logger.info(f"Transcription: {video_data['transcription']}...")
-        self.logger.info(f"Description: {video_data["description"][:300]}...")
+        self.logger.info(f"Description: {video_data['description'][:300]}...")
         prompt = openai_service.get_prompt("recipes.parse-recipe-video")
 
         message_parts = [
