@@ -452,7 +452,17 @@ class RecipeScraperOpenAITranscription(ABCScraperStrategy):
             return False
 
         # Check if we can actually download something to transcribe
-        return any(ie.suitable(self.url) for ie in _get_yt_dlp_extractors())
+        # Follow redirects first so share URLs (e.g. facebook.com/share/r/...) resolve to the real URL
+        url_to_check = self.url
+        try:
+            import urllib.request as _ur
+            req = _ur.Request(self.url, headers={'User-Agent': 'Mozilla/5.0'})
+            with _ur.urlopen(req, timeout=5) as r:
+                url_to_check = r.url
+        except Exception:
+            pass
+
+        return any(ie.suitable(url_to_check) for ie in _get_yt_dlp_extractors())
 
     @staticmethod
     def _parse_subtitle_content(subtitle_content: str) -> str:
@@ -558,11 +568,12 @@ class RecipeScraperOpenAITranscription(ABCScraperStrategy):
                     raise exceptions.OpenAIServiceError("No transcription returned from OpenAI")
                 video_data["transcription"] = transcription
 
-        if not video_data["transcription"]:
+        if not video_data["transcription"] and not video_data["description"]:
             self.logger.error("Could not extract a transcript (no data)")
             return None, None
 
-        self.logger.debug(f"Transcription: {video_data['transcription'][:200]}...")
+        self.logger.info(f"Transcription: {video_data['transcription']}...")
+        self.logger.info(f"Description: {video_data["description"][:300]}...")
         prompt = openai_service.get_prompt("recipes.parse-recipe-video")
 
         message_parts = [
