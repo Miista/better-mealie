@@ -481,10 +481,31 @@ class RecipeScraperOpenAITranscription(ABCScraperStrategy):
         """Downloads audio and subtitles from the video URL."""
         output_template = temp_path / "mealie"  # No extension here
 
+        # Capture yt-dlp's own error/warning messages so we can surface a
+        # specific reason (login required, removed, region/age gated, extractor
+        # breakage) instead of the generic "video may be unavailable" message.
+        # NOTE: extract_info runs with ignoreerrors=True below and returns None
+        # on failure, discarding the real cause — this logger buffer preserves it.
+        ydl_messages: list[str] = []
+
+        class _MessageLogger:
+            def debug(self, msg):
+                pass
+
+            def info(self, msg):
+                pass
+
+            def warning(self, msg):
+                ydl_messages.append(str(msg))
+
+            def error(self, msg):
+                ydl_messages.append(str(msg))
+
         ydl_opts = {
             "format": "bestaudio/best",
             "outtmpl": str(output_template) + ".%(ext)s",
             "quiet": True,
+            "logger": _MessageLogger(),
             "writesubtitles": True,
             "writeautomaticsub": True,
             "subtitleslangs": self.SUBTITLE_LANGS,
@@ -505,8 +526,20 @@ class RecipeScraperOpenAITranscription(ABCScraperStrategy):
                 info = ydl.extract_info(self.url, download=True)
 
                 if info is None:
+                    yt_dlp_reason = " | ".join(ydl_messages).strip()
+                    if yt_dlp_reason:
+                        self.logger.error(
+                            f"yt-dlp could not extract video from {self.url} — reason: {yt_dlp_reason}"
+                        )
+                    else:
+                        self.logger.error(
+                            f"yt-dlp could not extract video from {self.url} — no reason reported "
+                            "(video may be private, removed, region/age restricted, or require login)"
+                        )
                     raise exceptions.VideoDownloadError(
-                        "Failed to extract video information. The video may be unavailable or the URL is invalid."
+                        "Failed to extract video information. The video may be private, removed, "
+                        "region/age restricted, require login, or the URL is invalid."
+                        + (f" (yt-dlp: {yt_dlp_reason})" if yt_dlp_reason else "")
                     )
 
                 sub_path = None
