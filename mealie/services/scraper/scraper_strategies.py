@@ -401,7 +401,9 @@ class RecipeScraperOpenAITranscription(ABCScraperStrategy):
             if on_progress:
                 await on_progress(self.translator.t("recipe.create-progress.downloading-video"))
 
-            video_data = await asyncio.to_thread(transcription.download_video, self.url, temp_path)
+            video_data = await asyncio.to_thread(
+                transcription.download_video_or_og, self.url, temp_path, self.raw_html
+            )
 
             async def report_transcribing() -> None:
                 if on_progress:
@@ -411,7 +413,7 @@ class RecipeScraperOpenAITranscription(ABCScraperStrategy):
                 video_data, openai_service, before_transcribe=report_transcribing
             )
 
-        if not video_data["transcription"]:
+        if not video_data["transcription"] and not video_data["description"]:
             self.logger.error("Could not extract a transcript (no data)")
             return None, None
 

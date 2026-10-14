@@ -1,0 +1,50 @@
+name: Build and Push better-mealie
+
+on:
+  push:
+    branches: [main, upgrade/v3.28.0]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Validate patched Python
+        run: >-
+          python3 -m py_compile
+          mealie/services/openai/transcription.py
+          mealie/services/scraper/scraper_strategies.py
+          mealie/services/recipe/import_workflow/compilers/transcription.py
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: |
+            ${{ github.ref_name == 'main' && 'ghcr.io/miista/better-mealie:latest' || 'ghcr.io/miista/better-mealie:v3.28.0' }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

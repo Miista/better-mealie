@@ -16,7 +16,7 @@ logger = get_logger()
 
 
 class TranscribedAudio(TypedDict):
-    audio: Path
+    audio: Path | None
     subtitle: Path | None
     title: str
     description: str
@@ -62,10 +62,31 @@ def download_video(url: str, temp_path: Path) -> TranscribedAudio:
 
     output_template = temp_path / "mealie"  # No extension here
 
+    # Capture yt-dlp's own error/warning messages so we can surface a
+    # specific reason (login required, removed, region/age gated, extractor
+    # breakage) instead of the generic "video may be unavailable" message.
+    # NOTE: extract_info runs with ignoreerrors=True below and returns None
+    # on failure, discarding the real cause — this logger buffer preserves it.
+    ydl_messages: list[str] = []
+
+    class _MessageLogger:
+        def debug(self, msg):
+            pass
+
+        def info(self, msg):
+            pass
+
+        def warning(self, msg):
+            ydl_messages.append(str(msg))
+
+        def error(self, msg):
+            ydl_messages.append(str(msg))
+
     ydl_opts = {
         "format": "bestaudio/best",
         "outtmpl": str(output_template) + ".%(ext)s",
         "quiet": True,
+        "logger": _MessageLogger(),
         "writesubtitles": True,
         "writeautomaticsub": True,
         "subtitleslangs": SUBTITLE_LANGS,
@@ -90,8 +111,18 @@ def download_video(url: str, temp_path: Path) -> TranscribedAudio:
             info = ydl.extract_info(url, download=True)
 
             if info is None:
+                yt_dlp_reason = " | ".join(ydl_messages).strip()
+                if yt_dlp_reason:
+                    logger.error(f"yt-dlp could not extract video from {url} — reason: {yt_dlp_reason}")
+                else:
+                    logger.error(
+                        f"yt-dlp could not extract video from {url} — no reason reported "
+                        "(video may be private, removed, region/age restricted, or require login)"
+                    )
                 raise exceptions.VideoDownloadError(
-                    "Failed to extract video information. The video may be unavailable or the URL is invalid."
+                    "Failed to extract video information. The video may be private, removed, "
+                    "region/age restricted, require login, or the URL is invalid."
+                    + (f" (yt-dlp: {yt_dlp_reason})" if yt_dlp_reason else "")
                 )
 
             sub_path = None
@@ -113,6 +144,49 @@ def download_video(url: str, temp_path: Path) -> TranscribedAudio:
         raise
     except Exception as e:
         raise exceptions.VideoDownloadError(f"Failed to download video: {e}") from e
+
+
+def og_fallback(html: str | None) -> TranscribedAudio | None:
+    """
+    Builds video data from the page's Open Graph tags, for when yt-dlp can't download the
+    video (e.g. Instagram requires login). Returns None if the page has no og:description.
+    """
+
+    if not html:
+        return None
+
+    from bs4 import BeautifulSoup
+
+    soup = BeautifulSoup(html, "html.parser")
+
+    def og(name: str) -> str:
+        tag = soup.find("meta", property=name)
+        return str(tag.get("content") or "").strip() if tag else ""
+
+    description = og("og:description")
+    if not description:
+        return None
+
+    return {
+        "audio": None,
+        "subtitle": None,
+        "title": og("og:title"),
+        "description": description,
+        "thumbnail_url": og("og:image") or None,
+        "transcription": "",
+    }
+
+
+def download_video_or_og(url: str, temp_path: Path, html: str | None) -> TranscribedAudio:
+    """Downloads the video, falling back to the page's Open Graph data if yt-dlp fails."""
+
+    try:
+        return download_video(url, temp_path)
+    except exceptions.VideoDownloadError:
+        if (fallback := og_fallback(html)) is None:
+            raise
+        logger.info(f"yt-dlp failed, falling back to OG description for {url}")
+        return fallback
 
 
 def read_subtitles(video_data: TranscribedAudio) -> str:
@@ -149,6 +223,10 @@ async def resolve_transcription(
 
     if subtitles := read_subtitles(video_data):
         return subtitles
+
+    # nothing to transcribe (OG fallback); the description is all we have
+    if video_data["audio"] is None:
+        return ""
 
     if before_transcribe:
         await before_transcribe()

@@ -34,7 +34,9 @@ class TranscriptionCompiler(SourceCompiler):
         url = self._url() or ""
 
         with get_temporary_path() as temp_path:
-            video_data = await asyncio.to_thread(transcription.download_video, url, temp_path)
+            video_data = await asyncio.to_thread(
+                transcription.download_video_or_og, url, temp_path, self.ctx.input.page_content
+            )
 
             async def report_transcribing() -> None:
                 await self.ctx.report_progress("recipe.create-progress.transcribing-audio-with-ai")
@@ -43,14 +45,15 @@ class TranscriptionCompiler(SourceCompiler):
                 video_data, self.ctx.ai, before_transcribe=report_transcribing
             )
 
-        if not transcript:
+        if not transcript and not video_data["description"]:
             self.logger.error("Could not extract a transcript (no data)")
             return None
 
         content_parts = [f"# {video_data['title']}"] if video_data["title"] else []
         if video_data["description"]:
             content_parts.append(f"## Video description\n\n{video_data['description']}")
-        content_parts.append(f"## Video transcript\n\n{transcript}")
+        if transcript:
+            content_parts.append(f"## Video transcript\n\n{transcript}")
 
         return OpenAICompiledSource(
             contains_recipe=True,
