@@ -2,7 +2,8 @@ name: Build and Push better-mealie
 
 on:
   push:
-    branches: [main, upgrade/v3.28.0]
+    branches: [main]
+    tags: ["v*-better.*"]
   workflow_dispatch:
 
 jobs:
@@ -47,6 +48,6 @@ jobs:
           file: Dockerfile
           push: true
           tags: |
-            ${{ github.ref_name == 'main' && 'ghcr.io/miista/better-mealie:latest' || 'ghcr.io/miista/better-mealie:v3.28.0' }}
+            ${{ github.ref_type == 'tag' && format('ghcr.io/miista/better-mealie:{0}', github.ref_name) || 'ghcr.io/miista/better-mealie:latest' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
