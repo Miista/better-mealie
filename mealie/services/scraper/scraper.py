@@ -14,6 +14,7 @@ from mealie.schema.recipe.recipe import create_recipe_slug
 from mealie.services.recipe.recipe_data_service import RecipeDataService
 from mealie.services.scraper.scraped_extras import ScrapedExtras
 
+from .auto_translate import auto_translate
 from .cleaner import NO_IMAGE
 from .recipe_scraper import RecipeScraper
 
@@ -63,6 +64,7 @@ async def create_from_html(
     if not new_recipe:
         raise HTTPException(status.HTTP_400_BAD_REQUEST, {"details": ParserErrors.BAD_RECIPE_DATA.value})
 
+    new_recipe = await auto_translate(new_recipe, repos, translator, on_progress=on_progress)
     new_recipe = await finalize_scraped_recipe(new_recipe, translator, on_progress=on_progress)
     return new_recipe, extras
 

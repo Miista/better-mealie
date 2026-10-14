@@ -33,6 +33,8 @@ jobs:
           python3 -m py_compile
           mealie/services/openai/transcription.py
           mealie/services/scraper/scraper_strategies.py
+          mealie/services/scraper/scraper.py
+          mealie/services/scraper/auto_translate.py
           mealie/services/recipe/import_workflow/compilers/transcription.py
 
       - name: Set up Docker Buildx
