@@ -7,4 +7,4 @@ Upstream Mealie with these changes layered on top (`Dockerfile` copies the patch
 - **Real yt-dlp error reason** — video import failures report yt-dlp's own message instead of "video may be unavailable".
 - **Open Graph fallback** — when yt-dlp can't download (e.g. Instagram login wall), import from the page's og:title/description/image and skip Whisper.
 
-Releases are tagged `v<upstream>-better.<n>`. `upstream-sync` checks upstream daily: if none of the files above changed upstream it bumps the base and releases on its own, otherwise it opens an issue with a merge branch.
+Releases are tagged `v<upstream>-better.<n>`. `upstream-sync` checks upstream daily: if none of the files above changed upstream it bumps the base and releases on its own, otherwise it opens a pull request with upstream's changes merged in, and merging that releases.

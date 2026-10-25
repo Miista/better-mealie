@@ -4,7 +4,7 @@ name: Upstream sync
 # The Dockerfile copies whole files over the upstream image, so a file upstream changed
 # would silently lose upstream's changes. Only when none of them changed is the bump
 # committed and released here; otherwise the files are 3-way merged onto a branch and
-# an issue asks for a person to review it.
+# a pull request asks for a person to review it. Merging it releases.
 on:
   schedule:
     - cron: "17 5 * * *"
@@ -17,7 +17,7 @@ on:
 permissions:
   contents: write
   packages: write
-  issues: write
+  pull-requests: write
 
 concurrency:
   group: upstream-sync
@@ -114,17 +114,14 @@ jobs:
               echo "- \`$f\` — $s ([upstream diff](https://github.com/$UPSTREAM/compare/$base...$target))"
             done < changed.txt
             echo
-            echo "Review and merge: https://github.com/${{ github.repository }}/compare/main...$branch?expand=1"
-            echo
-            echo "Merging into main builds and releases \`$target-better.1\`."
-          } > issue.md
-          cat issue.md >> "$GITHUB_STEP_SUMMARY"
-          if [ "$(gh api "repos/${{ github.repository }}" --jq .has_issues)" = true ]; then
-            gh issue create --title "Upstream $target needs review" --body-file issue.md
-          fi
-          # a failed run is what gets a person's attention (GitHub emails it)
-          echo "::error::Upstream $target needs review: see the run summary"
-          exit 1
+            echo "Fix any conflict on this branch, then merge: that builds and releases \`$target-better.1\`."
+          } > pr.md
+          cat pr.md >> "$GITHUB_STEP_SUMMARY"
+          # a pull request opened by this workflow's token starts no workflows, so nothing
+          # builds until it's merged; the assignee is who GitHub notifies
+          url=$(gh pr create --base main --head "$branch" --title "deps: rebase on upstream $target" \
+            --body-file pr.md --assignee "${{ github.repository_owner }}")
+          echo "::notice::Upstream $target needs review: $url"
 
   build:
     needs: sync
