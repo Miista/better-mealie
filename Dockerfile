@@ -1,4 +1,4 @@
-FROM ghcr.io/mealie-recipes/mealie:v3.28.0
+FROM ghcr.io/mealie-recipes/mealie:v3.29.0
 
 ARG SITE=/opt/mealie/lib/python3.14/site-packages/mealie
 # COPY would silently create SITE if upstream moved to another Python; fail instead
