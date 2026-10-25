@@ -1,0 +1,133 @@
+name: Upstream sync
+
+# Daily: when upstream Mealie has a newer release, move the Dockerfile's base to it.
+# The Dockerfile copies whole files over the upstream image, so a file upstream changed
+# would silently lose upstream's changes. Only when none of them changed is the bump
+# committed and released here; otherwise the files are 3-way merged onto a branch and
+# an issue asks for a person to review it.
+on:
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Upstream tag to move to (default: upstream's latest release)"
+        required: false
+
+permissions:
+  contents: write
+  packages: write
+  issues: write
+
+concurrency:
+  group: upstream-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      UPSTREAM: mealie-recipes/mealie
+    outputs:
+      pushed: ${{ steps.apply.outputs.pushed }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Compare with upstream
+        id: check
+        run: |
+          base=$(sed -n 's#^FROM ghcr.io/mealie-recipes/mealie:\(v[^ @]*\).*#\1#p' Dockerfile)
+          target="${{ inputs.version }}"
+          [ -n "$target" ] || target=$(gh release view -R "$UPSTREAM" --json tagName --jq .tagName)
+          echo "base=$base target=$target"
+          if [ "$target" = "$base" ] || [ "$(printf '%s\n%s\n' "$base" "$target" | sort -V | tail -1)" = "$base" ]; then
+            echo "Already on $base"; echo "todo=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if git ls-remote --exit-code --heads origin "upstream/$target" >/dev/null; then
+            echo "upstream/$target already waiting for review"; echo "todo=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          echo "todo=true" >> "$GITHUB_OUTPUT"
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+          echo "target=$target" >> "$GITHUB_OUTPUT"
+
+      - name: Merge overlaid files
+        id: merge
+        if: steps.check.outputs.todo == 'true'
+        run: |
+          base=${{ steps.check.outputs.base }}
+          target=${{ steps.check.outputs.target }}
+          git fetch --no-tags --depth=1 "https://github.com/$UPSTREAM" \
+            "refs/tags/$base:refs/upstream/old" "refs/tags/$target:refs/upstream/new"
+          : > changed.txt
+          : > conflicts.txt
+          for f in $(awk '$1 == "COPY" {print $2}' Dockerfile); do
+            # fork-only files have nothing upstream to keep up with
+            git cat-file -e "refs/upstream/old:$f" 2>/dev/null || continue
+            if [ "$(git rev-parse "refs/upstream/old:$f")" = "$(git rev-parse "refs/upstream/new:$f" 2>/dev/null)" ]; then
+              continue
+            fi
+            echo "$f" >> changed.txt
+            if ! git cat-file -e "refs/upstream/new:$f" 2>/dev/null; then
+              echo "$f (removed upstream)" >> conflicts.txt
+              continue
+            fi
+            git show "refs/upstream/old:$f" > old.tmp
+            git show "refs/upstream/new:$f" > new.tmp
+            git merge-file -L ours -L "upstream $base" -L "upstream $target" "$f" old.tmp new.tmp || echo "$f" >> conflicts.txt
+          done
+          rm -f old.tmp new.tmp
+          sed -i "s#^FROM ghcr.io/mealie-recipes/mealie:${base}\$#FROM ghcr.io/mealie-recipes/mealie:${target}#" Dockerfile
+          grep -q "^FROM ghcr.io/mealie-recipes/mealie:${target}\$" Dockerfile
+          echo "changed=$(wc -l < changed.txt)" >> "$GITHUB_OUTPUT"
+
+      - name: Commit
+        id: apply
+        if: steps.check.outputs.todo == 'true'
+        run: |
+          base=${{ steps.check.outputs.base }}
+          target=${{ steps.check.outputs.target }}
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          if [ "${{ steps.merge.outputs.changed }}" = 0 ]; then
+            git commit -am "deps: rebase on upstream $target"
+            git push origin HEAD:main
+            echo "pushed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          branch="upstream/$target"
+          git checkout -b "$branch"
+          git commit -am "deps: rebase on upstream $target (needs review)"
+          git push origin "$branch"
+          {
+            echo "Upstream Mealie [$target](https://github.com/$UPSTREAM/releases/tag/$target) changed files this fork overwrites, so it was not released automatically."
+            echo
+            echo "Branch \`$branch\` has the base bumped and upstream's changes 3-way merged into our copies:"
+            echo
+            while read -r f; do
+              if grep -qxF "$f" conflicts.txt || grep -qF "$f (removed" conflicts.txt; then s="**conflict, fix by hand**"; else s="merged cleanly, review"; fi
+              echo "- \`$f\` — $s ([upstream diff](https://github.com/$UPSTREAM/compare/$base...$target))"
+            done < changed.txt
+            echo
+            echo "Review and merge: https://github.com/${{ github.repository }}/compare/main...$branch?expand=1"
+            echo
+            echo "Merging into main builds and releases \`$target-better.1\`."
+          } > issue.md
+          cat issue.md >> "$GITHUB_STEP_SUMMARY"
+          if [ "$(gh api "repos/${{ github.repository }}" --jq .has_issues)" = true ]; then
+            gh issue create --title "Upstream $target needs review" --body-file issue.md
+          fi
+          # a failed run is what gets a person's attention (GitHub emails it)
+          echo "::error::Upstream $target needs review: see the run summary"
+          exit 1
+
+  build:
+    needs: sync
+    if: needs.sync.outputs.pushed == 'true'
+    uses: ./.github/workflows/better-mealie-build.yml
+    secrets: inherit

@@ -1,28 +1,52 @@
 name: Build and Push better-mealie
 
+# main: build :latest, and release v<base>-better.1 the first time a new upstream base lands.
+# v*-better.* tags: build and (re)write that release, for fork-only changes on the same base.
 on:
   push:
     branches: [main]
     tags: ["v*-better.*"]
   workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: write
+  packages: write
+
+concurrency:
+  group: better-mealie-build
+  cancel-in-progress: false
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-
+    env:
+      GH_TOKEN: ${{ github.token }}
+      IMAGE: ghcr.io/miista/better-mealie
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Log in to GHCR
-        uses: docker/login-action@v3
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          ref: ${{ github.ref_type == 'tag' && github.ref || 'main' }}
+          fetch-depth: 0
+
+      - name: Work out version
+        id: version
+        run: |
+          base=$(sed -n 's#^FROM ghcr.io/mealie-recipes/mealie:\(v[^ @]*\).*#\1#p' Dockerfile)
+          [ -n "$base" ] || { echo "no upstream base in Dockerfile"; exit 1; }
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.ref_type }}" = tag ]; then
+            echo "version=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          elif [ -z "$(git tag -l "${base}-better.*")" ]; then
+            # first build on this upstream base
+            echo "version=${base}-better.1" >> "$GITHUB_OUTPUT"
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=$(git describe --tags --abbrev=0 --match "${base}-better.*")" >> "$GITHUB_OUTPUT"
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -38,8 +62,40 @@ jobs:
           mealie/services/scraper/auto_translate.py
           mealie/services/recipe/import_workflow/compilers/transcription.py
 
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+
+      - name: Build for smoke test
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          load: true
+          tags: better-mealie:smoke
+          build-args: VERSION=${{ steps.version.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test
+        run: |
+          docker run -d --name smoke -p 9000:9000 better-mealie:smoke
+          for _ in $(seq 1 60); do
+            curl -fsS http://localhost:9000/api/app/about >/dev/null 2>&1 && break
+            sleep 3
+          done
+          curl -fsS http://localhost:9000/api/app/about
+          docker exec smoke python -c "import mealie.services.scraper.scraper, mealie.services.scraper.auto_translate, mealie.services.recipe.import_workflow.compilers.transcription"
+          if docker logs smoke 2>&1 | grep -E "^Traceback|ImportError|ModuleNotFoundError"; then
+            echo "::error::errors in the container log"; exit 1
+          fi
+          docker rm -f smoke
 
       - name: Build and push
         uses: docker/build-push-action@v6
@@ -47,7 +103,34 @@ jobs:
           context: .
           file: Dockerfile
           push: true
+          build-args: VERSION=${{ steps.version.outputs.version }}
+          # a release tag is never rebuilt by a later push to main
           tags: |
-            ${{ github.ref_type == 'tag' && format('ghcr.io/miista/better-mealie:{0}', github.ref_name) || 'ghcr.io/miista/better-mealie:latest' }}
+            ${{ steps.version.outputs.release == 'true' && format('{0}:{1}', env.IMAGE, steps.version.outputs.version) || '' }}
+            ${{ github.ref_type != 'tag' && format('{0}:latest', env.IMAGE) || '' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Release with upstream notes
+        if: steps.version.outputs.release == 'true'
+        run: |
+          base=${{ steps.version.outputs.base }}
+          version=${{ steps.version.outputs.version }}
+          {
+            cat FORK.md
+            echo
+            echo "Image: \`${IMAGE}:${version}\`"
+            echo
+            echo "---"
+            echo
+            echo "## Upstream Mealie ${base}"
+            echo
+            echo "From https://github.com/mealie-recipes/mealie/releases/tag/${base}"
+            echo
+            gh release view "$base" -R mealie-recipes/mealie --json body --jq .body
+          } > notes.md
+          if gh release view "$version" >/dev/null 2>&1; then
+            gh release edit "$version" --title "$version" --notes-file notes.md
+          else
+            gh release create "$version" --target "$(git rev-parse HEAD)" --title "$version" --notes-file notes.md
+          fi
