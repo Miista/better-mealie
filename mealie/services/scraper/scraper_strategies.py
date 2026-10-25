@@ -417,13 +417,9 @@ class RecipeScraperOpenAITranscription(ABCScraperStrategy):
             if on_progress:
                 await on_progress(self.translator.t("recipe.create-progress.downloading-video"))
 
-<<<<<<< ours
             video_data = await asyncio.to_thread(
-                transcription.download_video_or_og, self.url, temp_path, self.raw_html
+                transcription.download_video_or_og, self.resource_url, temp_path, self.raw_html
             )
-=======
-            video_data = await asyncio.to_thread(transcription.download_video, self.resource_url, temp_path)
->>>>>>> upstream v3.29.0
 
             async def report_transcribing() -> None:
                 if on_progress:
