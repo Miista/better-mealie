@@ -12,7 +12,7 @@ from collections.abc import Awaitable, Callable
 from mealie.core.root_logger import get_logger
 from mealie.lang.providers import Translator
 from mealie.repos.repository_factory import AllRepositories
-from mealie.schema.recipe import Recipe
+from mealie.schema.recipe import RecipeDraft
 
 TRANSLATE_TO_ENV = "BETTER_MEALIE_TRANSLATE_TO"
 
@@ -35,11 +35,11 @@ logger = get_logger()
 
 
 async def auto_translate(
-    recipe: Recipe,
+    recipe: RecipeDraft,
     repos: AllRepositories,
     translator: Translator,
     on_progress: Callable[[str], Awaitable[None]] | None = None,
-) -> Recipe:
+) -> RecipeDraft:
     """Returns the recipe translated into BETTER_MEALIE_TRANSLATE_TO, or unchanged if that's unset or fails."""
 
     language = os.environ.get(TRANSLATE_TO_ENV, "").strip()
